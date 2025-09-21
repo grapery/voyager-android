@@ -193,7 +193,7 @@ sealed class TeamsApiError(message: String, val code: Int = -1, val originalErro
     /**
      * 获取用户友好的错误消息
      */
-    fun getUserFriendlyMessage(): String {
+    fun getUserFriendlyMessage(): String? {
         return when (this) {
             is NetworkError -> when {
                 isTimeout -> "网络连接超时，请检查网络设置"
