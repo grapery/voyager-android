@@ -71,8 +71,8 @@ class ChatServiceExample {
             
         } catch (e: ChatAPIError) {
             when (e) {
-                is ChatAPIError.AuthenticationError -> Log.e(TAG, "认证错误: ${e.message}")
-                is ChatAPIError.ServerError -> Log.e(TAG, "服务器错误: ${e.statusCode} - ${e.message}")
+                is ChatAPIError.AuthenticationError -> Log.e(TAG, "认证错误: ${e.errorMessage}")
+                is ChatAPIError.ServerError -> Log.e(TAG, "服务器错误: ${e.statusCode} - ${e.errorMessage}")
                 else -> Log.e(TAG, "会话管理失败: ${e.message}")
             }
         }
@@ -252,11 +252,11 @@ class ChatServiceExample {
         } catch (e: ChatAPIError) {
             when (e) {
                 is ChatAPIError.AuthenticationError -> {
-                    Log.e(TAG, "认证错误，需要重新登录: ${e.message}")
+                    Log.e(TAG, "认证错误，需要重新登录: ${e.errorMessage}")
                     // 跳转到登录页面
                 }
                 is ChatAPIError.ServerError -> {
-                    Log.e(TAG, "服务器错误 [${e.statusCode}]: ${e.message}")
+                    Log.e(TAG, "服务器错误 [${e.statusCode}]: ${e.errorMessage}")
                     // 显示服务器错误提示
                 }
                 is ChatAPIError.NetworkError -> {

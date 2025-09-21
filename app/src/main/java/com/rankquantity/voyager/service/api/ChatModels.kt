@@ -10,8 +10,8 @@ import com.google.gson.JsonObject
 sealed class ChatAPIError(message: String) : Exception(message) {
     object InvalidResponse : ChatAPIError("无效的响应数据")
     data class NetworkError(val originalError: Throwable) : ChatAPIError("网络错误: ${originalError.message}")
-    data class ServerError(val statusCode: Int, val message: String) : ChatAPIError("服务器错误 [$statusCode]: $message")
-    data class AuthenticationError(val message: String) : ChatAPIError("认证错误: $message")
+    data class ServerError(val statusCode: Int, val errorMessage: String) : ChatAPIError("服务器错误 [$statusCode]: $errorMessage")
+    data class AuthenticationError(val errorMessage: String) : ChatAPIError("认证错误: $errorMessage")
     object InvalidToken : ChatAPIError("无效的认证令牌")
     object UserIdMismatch : ChatAPIError("用户ID不匹配")
 }
@@ -22,7 +22,7 @@ sealed class ChatAPIError(message: String) : Exception(message) {
 enum class FeedbackType(val value: Int) {
     NONE(0),      // 无操作/取消
     LIKE(1),      // 点赞
-    DISLIKE(2)    // 点踩
+    DISLIKE(2);   // 点踩
     
     val description: String
         get() = when (this) {

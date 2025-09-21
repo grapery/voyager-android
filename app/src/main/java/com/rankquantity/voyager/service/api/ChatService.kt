@@ -111,7 +111,7 @@ class ChatService private constructor() {
      */
     private suspend fun <T> executeRequestWithRetry(
         request: suspend () -> T,
-        retryCount: () -> ChatSessionResponse = MAX_RETRY_COUNT
+        retryCount: Int = MAX_RETRY_COUNT
     ): T {
         return try {
             request()
@@ -142,16 +142,10 @@ class ChatService private constructor() {
     ): ChatSessionResponse {
         Log.d(TAG, "createSession开始 - userId: $userId, name: '$name', roleId: '$roleId', botId: '$botId'")
         return executeRequestWithRetry {
-            try {
-                val request = CreateSessionRequest(userId, name, roleId, botId)
-                val response = apiInterface.createSession(request)
-                Log.d(TAG, "createSession完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val request = CreateSessionRequest(userId, name, roleId, botId)
+            val response = apiInterface.createSession(request)
+            Log.d(TAG, "createSession完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
     
@@ -166,16 +160,10 @@ class ChatService private constructor() {
     ): ChatSessionResponse {
         Log.d(TAG, "createRoleSession开始 - roleId: $roleId, userId: $userId, title: '$title', desc: '$desc'")
         return executeRequestWithRetry {
-            try {
-                val request = CreateRoleSessionRequest(roleId, userId, title, desc)
-                val response = apiInterface.createRoleSession(request)
-                Log.d(TAG, "createRoleSession完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val request = CreateRoleSessionRequest(roleId, userId, title, desc)
+            val response = apiInterface.createRoleSession(request)
+            Log.d(TAG, "createRoleSession完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
     
@@ -185,15 +173,9 @@ class ChatService private constructor() {
     suspend fun clearRoleSession(sessionId: String): ChatSessionResponse {
         Log.d(TAG, "clearRoleSession开始 - sessionId: '$sessionId'")
         return executeRequestWithRetry {
-            try {
-                val response = apiInterface.clearRoleSession(sessionId)
-                Log.d(TAG, "clearRoleSession完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val response = apiInterface.clearRoleSession(sessionId)
+            Log.d(TAG, "clearRoleSession完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
     
@@ -203,15 +185,9 @@ class ChatService private constructor() {
     suspend fun getSession(userId: Long, roleId: Long): ChatSessionResponse {
         Log.d(TAG, "getSession开始 - userId: $userId, roleId: $roleId")
         return executeRequestWithRetry {
-            try {
-                val response = apiInterface.getSession(userId, roleId)
-                Log.d(TAG, "getSession完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val response = apiInterface.getSession(userId, roleId)
+            Log.d(TAG, "getSession完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
     
@@ -225,15 +201,9 @@ class ChatService private constructor() {
     ): ChatSessionListResponse {
         Log.d(TAG, "getUserSessions开始 - userId: $userId, page: $page, pageSize: $pageSize")
         return executeRequestWithRetry {
-            try {
-                val response = apiInterface.getUserSessions(userId, page, pageSize)
-                Log.d(TAG, "getUserSessions成功 - 会话数量: ${response.data?.sessions?.size ?: 0}, hasMore: ${response.data?.hasMore ?: false}, total: ${response.data?.total ?: 0}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val response = apiInterface.getUserSessions(userId, page, pageSize)
+            Log.d(TAG, "getUserSessions成功 - 会话数量: ${response.data?.sessions?.size ?: 0}, hasMore: ${response.data?.hasMore ?: false}, total: ${response.data?.total ?: 0}")
+            response
         }
     }
     
@@ -250,16 +220,10 @@ class ChatService private constructor() {
     ): ChatMessageResponse {
         Log.d(TAG, "sendSessionMessage开始 - sessionId: '$sessionId', content: '$content', messageType: ${messageType ?: "nil"}, metadata: ${metadata?.size ?: 0}个键")
         return executeRequestWithRetry {
-            try {
-                val request = SendSessionMessageRequest(content, messageType, metadata)
-                val response = apiInterface.sendSessionMessage(sessionId, request)
-                Log.d(TAG, "sendSessionMessage完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val request = SendSessionMessageRequest(content, messageType, metadata)
+            val response = apiInterface.sendSessionMessage(sessionId, request)
+            Log.d(TAG, "sendSessionMessage完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
     
@@ -274,15 +238,9 @@ class ChatService private constructor() {
     ): ChatMessageListResponse {
         Log.d(TAG, "getSessionMessages开始 - sessionId: '$sessionId', page: ${page ?: -1}, pageSize: ${pageSize ?: -1}, messageId: ${messageId ?: "nil"}")
         return executeRequestWithRetry {
-            try {
-                val response = apiInterface.getSessionMessages(sessionId, page, pageSize, messageId)
-                Log.d(TAG, "getSessionMessages完成 - code: ${response.code}, message: ${response.message}, 消息数量: ${response.data?.msgs?.size ?: 0}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val response = apiInterface.getSessionMessages(sessionId, page, pageSize, messageId)
+            Log.d(TAG, "getSessionMessages完成 - code: ${response.code}, message: ${response.message}, 消息数量: ${response.data?.msgs?.size ?: 0}")
+            response
         }
     }
     
@@ -296,16 +254,10 @@ class ChatService private constructor() {
     ): ChatMessageResponse {
         Log.d(TAG, "retryMessage开始 - sessionId: '$sessionId', messageId: $messageId, msg: '$msg'")
         return executeRequestWithRetry {
-            try {
-                val request = RetryMessageRequest(sessionId, messageId, msg)
-                val response = apiInterface.retryMessage(messageId, request)
-                Log.d(TAG, "retryMessage完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val request = RetryMessageRequest(sessionId, messageId, msg)
+            val response = apiInterface.retryMessage(messageId, request)
+            Log.d(TAG, "retryMessage完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
     
@@ -315,15 +267,9 @@ class ChatService private constructor() {
     suspend fun interruptMessage(messageId: Long): ChatInterruptResponse {
         Log.d(TAG, "interruptMessage开始 - messageId: $messageId")
         return executeRequestWithRetry {
-            try {
-                val response = apiInterface.interruptMessage(messageId)
-                Log.d(TAG, "interruptMessage完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val response = apiInterface.interruptMessage(messageId)
+            Log.d(TAG, "interruptMessage完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
     
@@ -337,16 +283,10 @@ class ChatService private constructor() {
     ): ChatFeedbackResponse {
         Log.d(TAG, "sendMessageFeedback开始 - messageId: '$messageId', type: $type, userId: $userId")
         return executeRequestWithRetry {
-            try {
-                val request = MessageFeedbackRequest(type, userId)
-                val response = apiInterface.sendMessageFeedback(messageId, request)
-                Log.d(TAG, "sendMessageFeedback完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val request = MessageFeedbackRequest(type, userId)
+            val response = apiInterface.sendMessageFeedback(messageId, request)
+            Log.d(TAG, "sendMessageFeedback完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
     
@@ -457,15 +397,9 @@ class ChatService private constructor() {
     suspend fun healthCheck(): ChatHealthResponse {
         Log.d(TAG, "healthCheck开始")
         return executeRequestWithRetry {
-            try {
-                val response = apiInterface.healthCheck()
-                Log.d(TAG, "healthCheck完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val response = apiInterface.healthCheck()
+            Log.d(TAG, "healthCheck完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
     
@@ -481,16 +415,10 @@ class ChatService private constructor() {
     ): FeedbackDetailResponse {
         Log.d(TAG, "createFeedback开始 - 标题: '$title', 类型: $feedbackType")
         return executeRequestWithRetry {
-            try {
-                val request = CreateFeedbackRequest(feedbackType, title, description)
-                val response = apiInterface.createFeedback(request)
-                Log.d(TAG, "createFeedback完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val request = CreateFeedbackRequest(feedbackType, title, description)
+            val response = apiInterface.createFeedback(request)
+            Log.d(TAG, "createFeedback完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
     
@@ -503,15 +431,9 @@ class ChatService private constructor() {
     ): FeedbackListResponse {
         Log.d(TAG, "getFeedbackList开始 - offset: $offset, limit: $limit")
         return executeRequestWithRetry {
-            try {
-                val response = apiInterface.getFeedbackList(offset, limit)
-                Log.d(TAG, "getFeedbackList完成 - code: ${response.code}, message: ${response.message}, 反馈数量: ${response.data?.feedbacks?.size ?: 0}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val response = apiInterface.getFeedbackList(offset, limit)
+            Log.d(TAG, "getFeedbackList完成 - code: ${response.code}, message: ${response.message}, 反馈数量: ${response.data?.feedbacks?.size ?: 0}")
+            response
         }
     }
     
@@ -521,15 +443,9 @@ class ChatService private constructor() {
     suspend fun getFeedbackDetail(id: Long): FeedbackDetailResponse {
         Log.d(TAG, "getFeedbackDetail开始 - id: $id")
         return executeRequestWithRetry {
-            try {
-                val response = apiInterface.getFeedbackDetail(id)
-                Log.d(TAG, "getFeedbackDetail完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val response = apiInterface.getFeedbackDetail(id)
+            Log.d(TAG, "getFeedbackDetail完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
     
@@ -539,15 +455,9 @@ class ChatService private constructor() {
     suspend fun getFeedbackTypes(): FeedbackTypesResponse {
         Log.d(TAG, "getFeedbackTypes开始")
         return executeRequestWithRetry {
-            try {
-                val response = apiInterface.getFeedbackTypes()
-                Log.d(TAG, "getFeedbackTypes完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val response = apiInterface.getFeedbackTypes()
+            Log.d(TAG, "getFeedbackTypes完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
     
@@ -557,15 +467,9 @@ class ChatService private constructor() {
     suspend fun getFeedbackStatuses(): FeedbackStatusesResponse {
         Log.d(TAG, "getFeedbackStatuses开始")
         return executeRequestWithRetry {
-            try {
-                val response = apiInterface.getFeedbackStatuses()
-                Log.d(TAG, "getFeedbackStatuses完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val response = apiInterface.getFeedbackStatuses()
+            Log.d(TAG, "getFeedbackStatuses完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
     
@@ -575,15 +479,9 @@ class ChatService private constructor() {
     suspend fun feedbackHealthCheck(): FeedbackHealthResponse {
         Log.d(TAG, "feedbackHealthCheck开始")
         return executeRequestWithRetry {
-            try {
-                val response = apiInterface.feedbackHealthCheck()
-                Log.d(TAG, "feedbackHealthCheck完成 - code: ${response.code}, message: ${response.message}")
-                response
-            } catch (e: ChatAPIError) {
-                throw e
-            } catch (e: Exception) {
-                throw ChatAPIError.NetworkError(e)
-            }
+            val response = apiInterface.feedbackHealthCheck()
+            Log.d(TAG, "feedbackHealthCheck完成 - code: ${response.code}, message: ${response.message}")
+            response
         }
     }
 }

@@ -26,13 +26,24 @@ class VipPayService private constructor() {
         
         @Volatile
         private var INSTANCE: VipPayService? = null
+        private val lock = Any()
         
         /**
-         * 获取单例实例
+         * 获取单例实例（线程安全）
          */
         fun getInstance(): VipPayService {
-            return INSTANCE ?: synchronized(this) {
+            return INSTANCE ?: synchronized(lock) {
                 INSTANCE ?: VipPayService().also { INSTANCE = it }
+            }
+        }
+        
+        /**
+         * 清理单例实例（用于测试或应用退出时）
+         */
+        fun clearInstance() {
+            synchronized(lock) {
+                INSTANCE?.cleanup()
+                INSTANCE = null
             }
         }
     }
@@ -59,10 +70,63 @@ class VipPayService private constructor() {
     
     private val apiInterface = retrofit.create(VipPayApiInterface::class.java)
     
-    // MARK: - 私有初始化方法
+    // MARK: - 初始化块
     
-    private init() {
+    init {
         Log.d(TAG, "VipPayService 初始化完成")
+    }
+    
+    /**
+     * 清理资源（防止内存泄漏）
+     */
+    fun cleanup() {
+        try {
+            // 清理OkHttp连接池
+            okHttpClient.dispatcher.executorService.shutdown()
+            okHttpClient.connectionPool.evictAll()
+            Log.d(TAG, "VipPayService资源清理完成")
+        } catch (e: Exception) {
+            Log.e(TAG, "清理资源时发生错误: ${e.message}")
+        }
+    }
+    
+    /**
+     * 通用响应处理方法
+     * 减少代码重复，统一错误处理逻辑
+     */
+    private fun <T> handleVipPayResponse(
+        response: VipPayResponse<T>,
+        operation: String,
+        successCallback: (T) -> Unit = {}
+    ) {
+        if (response.code != 0) {
+            val errorMessage = when (operation) {
+                "health" -> "健康检查失败"
+                "appleReceipt" -> "Apple收据验证失败"
+                "appleSubscription" -> "Apple订阅状态获取失败"
+                "appleNotification" -> "Apple通知处理失败"
+                "googlePurchase" -> "Google购买验证失败"
+                "googleSubscription" -> "Google订阅状态获取失败"
+                "googleNotification" -> "Google通知处理失败"
+                "acknowledgePurchase" -> "购买确认失败"
+                "consumePurchase" -> "购买消耗失败"
+                "syncSubscription" -> "订阅同步失败"
+                "getProducts" -> "产品列表获取失败"
+                "getProductDetail" -> "产品详情获取失败"
+                "getProductStats" -> "产品统计获取失败"
+                "getVIPInfo" -> "VIP信息获取失败"
+                "checkVIPStatus" -> "VIP状态检查失败"
+                "getQuotaInfo" -> "配额信息获取失败"
+                "getMaxRoles" -> "最大角色数获取失败"
+                "getMaxContexts" -> "最大上下文数获取失败"
+                else -> "操作失败"
+            }
+            Log.e(TAG, "❌ [VipPayService] $operation 失败：$errorMessage (错误码: ${response.code})")
+            throw VipPayError.ServerError(response.code, response.msg ?: errorMessage)
+        }
+        
+        response.data?.let { successCallback(it) }
+        Log.d(TAG, "✅ [VipPayService] $operation 成功")
     }
     
     // MARK: - 私有辅助方法
@@ -101,6 +165,7 @@ class VipPayService private constructor() {
     
     /**
      * 执行网络请求，带重试机制
+     * 增强的错误处理和网络状态检测，与ApiService保持一致
      * @param request 请求函数
      * @param retryCount 重试次数
      * @return 响应数据
@@ -117,11 +182,35 @@ class VipPayService private constructor() {
                 delay((MAX_RETRY_COUNT - retryCount + 1) * 1000L)
                 executeRequestWithRetry(request, retryCount - 1)
             } else {
-                throw VipPayError.NetworkError(e)
+                throw VipPayError.NetworkError(
+                    originalError = e,
+                    isTimeout = true
+                )
             }
+        } catch (e: java.net.ConnectException) {
+            Log.e(TAG, "连接失败: ${e.message}")
+            throw VipPayError.NetworkError(
+                originalError = e,
+                isConnectionError = true
+            )
+        } catch (e: java.net.UnknownHostException) {
+            Log.e(TAG, "主机解析失败: ${e.message}")
+            throw VipPayError.NetworkError(
+                originalError = e,
+                isConnectionError = true
+            )
+        } catch (e: retrofit2.HttpException) {
+            Log.e(TAG, "HTTP错误: ${e.code()} - ${e.message()}")
+            throw VipPayError.NetworkError(
+                originalError = e,
+                httpStatusCode = e.code()
+            )
+        } catch (e: VipPayError) {
+            // 直接抛出VipPayError，不进行重试
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "网络请求失败: ${e.message}")
-            throw VipPayError.NetworkError(e)
+            throw VipPayError.NetworkError(originalError = e)
         }
     }
     
@@ -132,101 +221,20 @@ class VipPayService private constructor() {
      * @return 健康检查数据
      */
     suspend fun checkHealth(): HealthCheckData {
-        Log.d(TAG, "执行健康检查")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始健康检查")
+        return executeRequestWithRetry<HealthCheckData>(
+            request = {
                 val response = apiInterface.checkHealth()
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到健康检查响应")
+                
+                handleVipPayResponse(response, "health") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
-    // MARK: - Apple IAP 接口
-    
-    /**
-     * 验证 Apple 收据
-     * @param receiptData Base64 编码的收据数据
-     * @param sandbox 是否为沙盒环境
-     * @return 收据验证结果
-     */
-    suspend fun verifyAppleReceipt(
-        receiptData: String,
-        sandbox: Boolean = false
-    ): AppleReceiptVerifyData {
-        Log.d(TAG, "验证 Apple 收据")
-        return executeRequestWithRetry {
-            try {
-                val request = AppleReceiptVerifyRequest(receiptData, sandbox)
-                val response = apiInterface.verifyAppleReceipt(request)
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
-                response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
-            }
-        }
-    }
-    
-    /**
-     * 获取 Apple 订阅状态
-     * @param originalTransactionId 原始交易ID
-     * @return 订阅状态信息
-     */
-    suspend fun getAppleSubscriptionStatus(
-        originalTransactionId: String
-    ): AppleSubscriptionStatusData {
-        Log.d(TAG, "获取 Apple 订阅状态: $originalTransactionId")
-        return executeRequestWithRetry {
-            try {
-                val request = AppleSubscriptionStatusRequest(originalTransactionId)
-                val response = apiInterface.getAppleSubscriptionStatus(request)
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
-                response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
-            }
-        }
-    }
-    
-    /**
-     * 处理 Apple 通知
-     * @param signedPayload Apple 签名的通知数据
-     * @return 通知处理结果
-     */
-    suspend fun handleAppleNotification(
-        signedPayload: String
-    ): AppleNotificationData {
-        Log.d(TAG, "处理 Apple 通知")
-        return executeRequestWithRetry {
-            try {
-                val request = AppleNotificationRequest(signedPayload)
-                val response = apiInterface.handleAppleNotification(request)
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
-                response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
-            }
-        }
-    }
-    
+
     // MARK: - Google IAP 接口
     
     /**
@@ -239,21 +247,20 @@ class VipPayService private constructor() {
         purchaseToken: String,
         productId: String
     ): GooglePurchaseVerifyData {
-        Log.d(TAG, "验证 Google 购买: $productId")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始验证 Google 购买: $productId")
+        return executeRequestWithRetry<GooglePurchaseVerifyData>(
+            request = {
                 val request = GooglePurchaseVerifyRequest(purchaseToken, productId)
+                Log.d(TAG, "📤 [VipPayService] 发送Google购买验证请求")
+                
                 val response = apiInterface.verifyGooglePurchase(request)
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到Google购买验证响应")
+                
+                handleVipPayResponse(response, "googlePurchase") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
     /**
@@ -266,21 +273,20 @@ class VipPayService private constructor() {
         purchaseToken: String,
         productId: String
     ): GoogleSubscriptionStatusData {
-        Log.d(TAG, "获取 Google 订阅状态: $productId")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始获取 Google 订阅状态: $productId")
+        return executeRequestWithRetry<GoogleSubscriptionStatusData>(
+            request = {
                 val request = GoogleSubscriptionStatusRequest(purchaseToken, productId)
+                Log.d(TAG, "📤 [VipPayService] 发送Google订阅状态请求")
+                
                 val response = apiInterface.getGoogleSubscriptionStatus(request)
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到Google订阅状态响应")
+                
+                handleVipPayResponse(response, "googleSubscription") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
     /**
@@ -299,23 +305,22 @@ class VipPayService private constructor() {
         subscriptionId: String,
         packageName: String
     ): GoogleNotificationData {
-        Log.d(TAG, "处理 Google 通知: $subscriptionId")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始处理 Google 通知: $subscriptionId")
+        return executeRequestWithRetry<GoogleNotificationData>(
+            request = {
                 val request = GoogleNotificationRequest(
                     version, notificationType, eventTimeMillis, subscriptionId, packageName
                 )
+                Log.d(TAG, "📤 [VipPayService] 发送Google通知处理请求")
+                
                 val response = apiInterface.handleGoogleNotification(request)
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到Google通知处理响应")
+                
+                handleVipPayResponse(response, "googleNotification") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
     // MARK: - 通用 IAP 接口
@@ -332,21 +337,20 @@ class VipPayService private constructor() {
         purchaseToken: String,
         productId: String
     ): AcknowledgePurchaseData {
-        Log.d(TAG, "确认购买: $platform - $productId")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始确认购买: $platform - $productId")
+        return executeRequestWithRetry<AcknowledgePurchaseData>(
+            request = {
                 val request = AcknowledgePurchaseRequest(platform.value, purchaseToken, productId)
+                Log.d(TAG, "📤 [VipPayService] 发送购买确认请求")
+                
                 val response = apiInterface.acknowledgePurchase(request)
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到购买确认响应")
+                
+                handleVipPayResponse(response, "acknowledgePurchase") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
     /**
@@ -361,21 +365,20 @@ class VipPayService private constructor() {
         purchaseToken: String,
         productId: String
     ): ConsumePurchaseData {
-        Log.d(TAG, "消耗购买: $platform - $productId")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始消耗购买: $platform - $productId")
+        return executeRequestWithRetry<ConsumePurchaseData>(
+            request = {
                 val request = ConsumePurchaseRequest(platform.value, purchaseToken, productId)
+                Log.d(TAG, "📤 [VipPayService] 发送购买消耗请求")
+                
                 val response = apiInterface.consumePurchase(request)
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到购买消耗响应")
+                
+                handleVipPayResponse(response, "consumePurchase") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
     /**
@@ -384,21 +387,20 @@ class VipPayService private constructor() {
      * @return 同步结果
      */
     suspend fun syncSubscription(platform: PaymentPlatform): SyncSubscriptionData {
-        Log.d(TAG, "同步订阅状态: $platform")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始同步订阅状态: $platform")
+        return executeRequestWithRetry<SyncSubscriptionData>(
+            request = {
                 val request = SyncSubscriptionRequest(platform.value)
+                Log.d(TAG, "📤 [VipPayService] 发送订阅同步请求")
+                
                 val response = apiInterface.syncSubscription(request)
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到订阅同步响应")
+                
+                handleVipPayResponse(response, "syncSubscription") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
     // MARK: - 产品管理接口
@@ -415,24 +417,23 @@ class VipPayService private constructor() {
         type: ProductType? = null,
         featured: Boolean? = null
     ): ProductListData {
-        Log.d(TAG, "获取产品列表: $platform")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始获取产品列表: $platform")
+        return executeRequestWithRetry<ProductListData>(
+            request = {
+                Log.d(TAG, "📤 [VipPayService] 发送产品列表请求")
+                
                 val response = apiInterface.getProducts(
                     platform.value,
                     type?.value,
                     featured
                 )
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到产品列表响应")
+                
+                handleVipPayResponse(response, "getProducts") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
     /**
@@ -441,20 +442,19 @@ class VipPayService private constructor() {
      * @return 产品详情
      */
     suspend fun getProductDetail(productId: Int): ProductDetailData {
-        Log.d(TAG, "获取产品详情: $productId")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始获取产品详情: $productId")
+        return executeRequestWithRetry<ProductDetailData>(
+            request = {
+                Log.d(TAG, "📤 [VipPayService] 发送产品详情请求")
+                
                 val response = apiInterface.getProductDetail(productId)
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到产品详情响应")
+                
+                handleVipPayResponse(response, "getProductDetail") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
     /**
@@ -463,20 +463,19 @@ class VipPayService private constructor() {
      * @return 产品统计信息
      */
     suspend fun getProductStats(platform: PaymentPlatform): ProductStatsData {
-        Log.d(TAG, "获取产品统计: $platform")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始获取产品统计: $platform")
+        return executeRequestWithRetry<ProductStatsData>(
+            request = {
+                Log.d(TAG, "📤 [VipPayService] 发送产品统计请求")
+                
                 val response = apiInterface.getProductStats(platform.value)
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到产品统计响应")
+                
+                handleVipPayResponse(response, "getProductStats") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
     // MARK: - VIP 会员接口
@@ -486,20 +485,19 @@ class VipPayService private constructor() {
      * @return VIP 会员信息
      */
     suspend fun getVIPInfo(): VIPInfo {
-        Log.d(TAG, "获取 VIP 信息")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始获取 VIP 信息")
+        return executeRequestWithRetry<VIPInfo>(
+            request = {
+                Log.d(TAG, "📤 [VipPayService] 发送VIP信息请求")
+                
                 val response = apiInterface.getVIPInfo()
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到VIP信息响应")
+                
+                handleVipPayResponse(response, "getVIPInfo") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
     /**
@@ -507,20 +505,19 @@ class VipPayService private constructor() {
      * @return VIP 状态信息
      */
     suspend fun checkVIPStatus(): VIPStatusData {
-        Log.d(TAG, "检查 VIP 状态")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始检查 VIP 状态")
+        return executeRequestWithRetry<VIPStatusData>(
+            request = {
+                Log.d(TAG, "📤 [VipPayService] 发送VIP状态检查请求")
+                
                 val response = apiInterface.checkVIPStatus()
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到VIP状态检查响应")
+                
+                handleVipPayResponse(response, "checkVIPStatus") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
     /**
@@ -528,20 +525,19 @@ class VipPayService private constructor() {
      * @return 配额使用情况
      */
     suspend fun getQuotaInfo(): QuotaInfo {
-        Log.d(TAG, "获取配额信息")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始获取配额信息")
+        return executeRequestWithRetry<QuotaInfo>(
+            request = {
+                Log.d(TAG, "📤 [VipPayService] 发送配额信息请求")
+                
                 val response = apiInterface.getQuotaInfo()
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到配额信息响应")
+                
+                handleVipPayResponse(response, "getQuotaInfo") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
     /**
@@ -549,20 +545,19 @@ class VipPayService private constructor() {
      * @return 最大角色数信息
      */
     suspend fun getMaxRoles(): MaxRolesData {
-        Log.d(TAG, "获取最大角色数")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始获取最大角色数")
+        return executeRequestWithRetry<MaxRolesData>(
+            request = {
+                Log.d(TAG, "📤 [VipPayService] 发送最大角色数请求")
+                
                 val response = apiInterface.getMaxRoles()
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到最大角色数响应")
+                
+                handleVipPayResponse(response, "getMaxRoles") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
     
     /**
@@ -570,19 +565,18 @@ class VipPayService private constructor() {
      * @return 最大上下文数信息
      */
     suspend fun getMaxContexts(): MaxContextsData {
-        Log.d(TAG, "获取最大上下文数")
-        return executeRequestWithRetry {
-            try {
+        Log.d(TAG, "🌐 [VipPayService] 开始获取最大上下文数")
+        return executeRequestWithRetry<MaxContextsData>(
+            request = {
+                Log.d(TAG, "📤 [VipPayService] 发送最大上下文数请求")
+                
                 val response = apiInterface.getMaxContexts()
-                if (response.code != 0) {
-                    throw VipPayError.ServerError(response.code, response.msg)
-                }
+                Log.d(TAG, "📥 [VipPayService] 收到最大上下文数响应")
+                
+                handleVipPayResponse(response, "getMaxContexts") { }
+                
                 response.data ?: throw VipPayError.NoData
-            } catch (e: VipPayError) {
-                throw e
-            } catch (e: Exception) {
-                throw VipPayError.ParseError(e)
             }
-        }
+        )
     }
 }
